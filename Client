@@ -1,0 +1,178 @@
+local Players = game:GetService("Players")
+local SS = game:GetService("ServerScriptService")
+local RS = game:GetService("ReplicatedStorage")
+local RS_Modules = RS.Replicated
+local PlayerRequest = RS.PlayerRequest
+local Service_Characters = require(RS_Modules.Service_Characters)
+local Service_info = require(RS_Modules.Service_Info)
+local Client_info = Service_info.Client
+local Player_data = Client_info.Client_Data
+
+
+
+
+local Camera = workspace.Camera
+local DEFAULT_FOV = Camera.FieldOfView
+local FOV_running = 3
+
+local Service_Visual = require(script.Service_Visual)
+local Service_UI = require(script.Service_UI)
+
+local RbxScriptConnections = {}
+
+local Stage = nil
+
+type Place_info = {
+	Instant_load:boolean,
+	Lobby:boolean,
+	Place:string,
+	Camera:CFrame,
+}
+
+local Enum_Functions = {
+	screen = {
+		loading = function()
+			Service_UI.screen.set.loading()
+		end,
+	},
+	stage = {
+		deactivation = function(Data)
+			
+		end,
+	}
+}
+
+
+local Keys = {
+	Translator = setmetatable({One = 1,
+		Two = 2,
+		Three = 3,
+		Four = 4,
+		Five = 5,
+		Six = 6,
+		Seven = 7,
+		Eight = 8,
+		Nine = 9,
+		Zero = 0},{__index = function(table,key)
+		return key
+	end,
+	}),
+	Input_getname = function (Key:InputObject)
+		local Keycode = Key.keyCode.Name
+		local UserInputType = Key.UserInputType.Name
+		if Keycode == "Unknown" then
+			return UserInputType
+		else
+			return Keycode
+		end
+	end,
+	Input_All = {
+		LeftShift = function(Pressing)
+			Service_Visual.Player.FOV_Change(DEFAULT_FOV + (Pressing and FOV_running or 0))
+			PlayerRequest:FireServer("Player_Input","LeftShift",{Pressing = Pressing})
+		end,
+	}
+}
+
+
+return {
+	Server = setmetatable({
+		Place_Update  = function(Data:Place_info)
+			local P_Curses = Player_data.Curses
+			local Place = Data.Place
+			if Place then
+				Player_data.Place = Place
+			end
+			local Lobby = Data.Lobby
+			if Lobby ~= nil then
+				Player_data.Lobby = Lobby
+			end
+			Service_Visual.enviroment_update(Data.Instant_load)
+		end,
+		Curse_Update = function(Data:Place_info)
+			local Curse = Data.Curse
+			local Delete = Data.Delete
+			local P_Curses = Player_data.Curses
+			if Delete then
+				table.remove(P_Curses,table.find(P_Curses,Curse))
+			else
+				if not table.find(P_Curses,Curse) then
+					P_Curses[#P_Curses+1] = Curse
+				end
+			end
+			Service_UI.Curse_Update(Data)
+		end,
+		
+		Debug = function(message)
+			Service_UI.Debug[message]()
+		end,
+		Camera = function(Data)
+			Service_Visual.Player.Cameras[Data.CameraType](Data.Camera)
+		end,
+		Stage_Update = function(Data)
+			local Player_Stage = Player_data.Stage
+			local Lobby = Player_data.Lobby
+			local First_time = Data.First_time
+			local NewStage = Data.Stage
+			Player_data.Stage = NewStage
+			Player_data.Place = Data.Place or Player_data.Place
+			task.spawn(function()
+				Service_UI.Stage_Update(NewStage,First_time)
+			end)
+			task.spawn(function()
+				Service_Visual.Stage_Update(NewStage,First_time)
+			end)
+			if not Lobby then
+				if Player_Stage then
+					local stage_info = Service_Visual.Stages[Player_Stage]
+					if stage_info then
+						local Stage_function = stage_info.Deactivation
+						local Succes = Stage_function and Stage_function()
+					end
+				end
+				local stage_info = Service_Visual.Stages[NewStage]
+				if stage_info then
+					local Stage_function = stage_info.Activation
+					local Succes = Stage_function and Stage_function()
+				end
+			end
+			Player_data.Stage = NewStage
+		end,
+		Kill = function(Data)
+			Service_UI.Kill()
+		end,
+		UI_Update = function(Data)
+			warn("Missing function in this point!")
+		end,
+	},{
+		__index = function(table,index)
+		error ("no se encontro la indexacion : "..index)
+	end,
+	}),
+	Character_Register = function(Character)
+		local PP = Character:WaitForChild "HumanoidRootPart"
+		for _,RbxScriptConnection in pairs(RbxScriptConnections) do
+			RbxScriptConnection:Disconnect()
+		end
+		RbxScriptConnections.Touched = PP.Touched:Connect(function(Part)
+			local Client_inputs = Service_Characters.Enum_Interact.Client
+			local Interact_function = Client_inputs[Part.Parent.Name]
+			if Interact_function then
+				Interact_function(Character)
+			else
+				local Input = Part.Name
+				local Input_function = Player_data.Avaliable_inputs[Part.Name]
+				if Input_function then
+					Client_inputs.Inputs[Input](Character,Part)
+				end
+			end
+		end)
+	end,
+	Keyboard = function(Key,Pressing)
+		local KeyName = Keys.Translator[Keys.Input_getname(Key)]
+		local AvaliableInput = Keys.Input_All[KeyName]
+		if AvaliableInput then
+			AvaliableInput(Pressing)
+		end
+	end,
+}
